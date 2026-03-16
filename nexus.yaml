@@ -1,0 +1,20 @@
+name: guardian
+id: guardian
+type: web-api
+language: go
+version: 0.1.0
+keywords:
+  - guardian
+  - observer
+  - policy
+capabilities:
+  - policy-auditing
+  - findings-report
+  - anomaly-detection
+depends_on:
+  - nexus
+  - forge
+  - navigator
+runtime:
+  provider: process
+  port: 8085
