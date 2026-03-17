@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Harshmaury/Canon/identity"
 	"github.com/Harshmaury/Guardian/internal/policy"
 )
 
@@ -28,14 +29,18 @@ func NewForgeCollector(baseURL, serviceToken string) *ForgeCollector {
 }
 
 // Collect fetches recent execution records from Forge.
-func (c *ForgeCollector) Collect(ctx context.Context) []policy.ExecutionRecord {
+// traceID is the collection-cycle trace ID for X-Trace-ID propagation (FEAT-002).
+func (c *ForgeCollector) Collect(ctx context.Context, traceID string) []policy.ExecutionRecord {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
 		c.baseURL+"/history?limit=100", nil)
 	if err != nil {
 		return nil
 	}
 	if c.serviceToken != "" {
-		req.Header.Set("X-Service-Token", c.serviceToken)
+		req.Header.Set(identity.ServiceTokenHeader, c.serviceToken)
+	}
+	if traceID != "" {
+		req.Header.Set(identity.TraceIDHeader, traceID)
 	}
 
 	resp, err := c.httpClient.Do(req)
@@ -47,6 +52,11 @@ func (c *ForgeCollector) Collect(ctx context.Context) []policy.ExecutionRecord {
 	}
 	defer resp.Body.Close()
 
+	return decodeForgeResponse(resp)
+}
+
+// decodeForgeResponse parses the Forge /history response body.
+func decodeForgeResponse(resp *http.Response) []policy.ExecutionRecord {
 	var envelope struct {
 		OK   bool `json:"ok"`
 		Data []struct {
@@ -61,7 +71,10 @@ func (c *ForgeCollector) Collect(ctx context.Context) []policy.ExecutionRecord {
 
 	records := make([]policy.ExecutionRecord, 0, len(envelope.Data))
 	for _, d := range envelope.Data {
-		ts, _ := time.Parse(time.RFC3339Nano, d.StartedAt)
+		ts, err := time.Parse(time.RFC3339Nano, d.StartedAt)
+		if err != nil {
+			ts = time.Time{} // zero time on malformed timestamp — safe default
+		}
 		records = append(records, policy.ExecutionRecord{
 			Target:    d.Target,
 			Status:    d.Status,
@@ -70,3 +83,4 @@ func (c *ForgeCollector) Collect(ctx context.Context) []policy.ExecutionRecord {
 	}
 	return records
 }
+

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Harshmaury/Canon/identity"
 	"github.com/Harshmaury/Guardian/internal/policy"
 )
 
@@ -27,11 +28,15 @@ func NewNavigatorCollector(baseURL string) *NavigatorCollector {
 }
 
 // Collect fetches topology nodes from Navigator.
-func (c *NavigatorCollector) Collect(ctx context.Context) []policy.TopologyNode {
+// traceID is the collection-cycle trace ID for X-Trace-ID propagation (FEAT-002).
+func (c *NavigatorCollector) Collect(ctx context.Context, traceID string) []policy.TopologyNode {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
 		c.baseURL+"/topology/graph", nil)
 	if err != nil {
 		return nil
+	}
+	if traceID != "" {
+		req.Header.Set(identity.TraceIDHeader, traceID)
 	}
 
 	resp, err := c.httpClient.Do(req)
