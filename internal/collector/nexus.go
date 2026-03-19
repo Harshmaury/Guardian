@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	canon "github.com/Harshmaury/Canon/identity"
 	"github.com/Harshmaury/Guardian/internal/policy"
 )
 
@@ -37,7 +38,7 @@ func (c *NexusCollector) Collect(ctx context.Context) []policy.NexusEvent {
 		return nil
 	}
 	if c.serviceToken != "" {
-		req.Header.Set("X-Service-Token", c.serviceToken)
+		req.Header.Set(canon.ServiceTokenHeader, c.serviceToken)
 	}
 
 	resp, err := c.httpClient.Do(req)
@@ -82,7 +83,7 @@ func (c *NexusCollector) CollectServices(ctx context.Context) []policy.ServiceRe
 		return nil
 	}
 	if c.serviceToken != "" {
-		req.Header.Set("X-Service-Token", c.serviceToken)
+		req.Header.Set(canon.ServiceTokenHeader, c.serviceToken)
 	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil || resp.StatusCode != http.StatusOK {
@@ -123,7 +124,7 @@ func (c *NexusCollector) CollectProjects(ctx context.Context) []policy.ProjectRe
 		return nil
 	}
 	if c.serviceToken != "" {
-		req.Header.Set("X-Service-Token", c.serviceToken)
+		req.Header.Set(canon.ServiceTokenHeader, c.serviceToken)
 	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil || resp.StatusCode != http.StatusOK {
