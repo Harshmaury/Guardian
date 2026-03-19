@@ -2,7 +2,7 @@ name: guardian
 id: guardian
 type: web-api
 language: go
-version: 0.1.0
+version: 0.2.0-phase2
 keywords:
   - guardian
   - observer

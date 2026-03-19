@@ -7,6 +7,8 @@ package policy
 import (
 	"fmt"
 	"time"
+
+	canonevents "github.com/Harshmaury/Canon/events"
 )
 
 // ── INPUT TYPES ───────────────────────────────────────────────────────────────
@@ -186,7 +188,7 @@ func (e *Engine) ruleServiceCrashes(events []NexusEvent) []*Finding {
 	cutoff := time.Now().UTC().Add(-5 * time.Minute)
 	var crashes []time.Time
 	for _, ev := range events {
-		if ev.Type == "SERVICE_CRASHED" && ev.CreatedAt.After(cutoff) {
+		if ev.Type == canonevents.EventServiceCrashed && ev.CreatedAt.After(cutoff) {
 			crashes = append(crashes, ev.CreatedAt)
 		}
 	}
