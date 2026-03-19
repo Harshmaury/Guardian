@@ -2,6 +2,10 @@
 // @guardian-path: cmd/guardian/main.go
 // guardian is the platform policy observer daemon (ADR-013).
 //
+// Phase 2 (audit fixes):
+//   - Each evaluation cycle carries a unique gd-<hex> trace ID (audit #3)
+//   - Collectors log WARNING on upstream failure (audit #4)
+//
 // Startup sequence:
 //  1. Config
 //  2. Collectors (Forge, Navigator, Nexus)
@@ -13,6 +17,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"log"
 	"os"
@@ -28,7 +33,7 @@ import (
 	"github.com/Harshmaury/Guardian/internal/policy"
 )
 
-const guardianVersion = "0.1.0"
+const guardianVersion = "0.2.0"
 
 func main() {
 	logger := log.New(os.Stdout, "[guardian] ", log.LstdFlags)
@@ -55,9 +60,9 @@ func run(logger *log.Logger) error {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
 	// ── 2. COLLECTORS ────────────────────────────────────────────────────────
-	forgeColl     := collector.NewForgeCollector(forgeAddr, serviceToken)
-	navigatorColl := collector.NewNavigatorCollector(navigatorAddr)
-	nexusColl     := collector.NewNexusCollector(nexusAddr, serviceToken)
+	forgeColl     := collector.NewForgeCollector(forgeAddr, serviceToken, logger)
+	navigatorColl := collector.NewNavigatorCollector(navigatorAddr, logger)
+	nexusColl     := collector.NewNexusCollector(nexusAddr, serviceToken, logger)
 
 	// ── 3. POLICY ENGINE + REPORT STORE ──────────────────────────────────────
 	engine      := policy.NewEngine()
@@ -112,7 +117,8 @@ func run(logger *log.Logger) error {
 	return nil
 }
 
-// evaluate runs all collectors and policy engine, updates the report store.
+// evaluate runs one collection + policy cycle with a unique trace ID.
+// The trace ID propagates to all upstream calls via X-Trace-ID (audit #3).
 func evaluate(
 	ctx context.Context,
 	engine *policy.Engine,
@@ -122,14 +128,25 @@ func evaluate(
 	store *handler.ReportStore,
 	logger *log.Logger,
 ) {
-	execs    := forgeColl.Collect(ctx, "")
-	nodes    := navColl.Collect(ctx, "")
-	events   := nexusColl.Collect(ctx)
-	services := nexusColl.CollectServices(ctx)
-	projects := nexusColl.CollectProjects(ctx)
+	traceID := newCycleTraceID()
+
+	execs    := forgeColl.Collect(ctx, traceID)
+	nodes    := navColl.Collect(ctx, traceID)
+	events   := nexusColl.Collect(ctx, traceID)
+	services := nexusColl.CollectServices(ctx, traceID)
+	projects := nexusColl.CollectProjects(ctx, traceID)
 
 	report := engine.Evaluate(execs, nodes, events, services, projects)
 	store.Set(report)
-	logger.Printf("evaluated — %d finding(s) [%d warnings, %d errors]",
-		report.Summary.Total, report.Summary.Warnings, report.Summary.Errors)
+	logger.Printf("evaluated trace=%s — %d finding(s) [%d warnings, %d errors]",
+		traceID, report.Summary.Total, report.Summary.Warnings, report.Summary.Errors)
+}
+
+// newCycleTraceID generates a unique gd-<hex> trace ID for one evaluation cycle.
+func newCycleTraceID() string {
+	b := make([]byte, 4)
+	if _, err := rand.Read(b); err != nil {
+		return fmt.Sprintf("gd-%d", time.Now().UnixNano())
+	}
+	return fmt.Sprintf("gd-%x", b)
 }
