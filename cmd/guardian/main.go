@@ -13,8 +13,6 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"log"
 	"os"
@@ -41,41 +39,25 @@ func main() {
 	logger.Println("Guardian stopped cleanly")
 }
 
-// guardianConfig holds resolved runtime configuration.
-type guardianConfig struct {
-	httpAddr      string
-	nexusAddr     string
-	forgeAddr     string
-	navigatorAddr string
-	serviceToken  string
-}
-
-// loadConfig reads all environment variables and logs warnings.
-func loadConfig(logger *log.Logger) guardianConfig {
-	cfg := guardianConfig{
-		httpAddr:      config.EnvOrDefault("GUARDIAN_HTTP_ADDR", config.DefaultHTTPAddr),
-		nexusAddr:     config.EnvOrDefault("NEXUS_HTTP_ADDR", config.DefaultNexusAddr),
-		forgeAddr:     config.EnvOrDefault("FORGE_HTTP_ADDR", config.DefaultForgeAddr),
-		navigatorAddr: config.EnvOrDefault("NAVIGATOR_HTTP_ADDR", config.DefaultNavigatorAddr),
-		serviceToken:  config.EnvOrDefault("GUARDIAN_SERVICE_TOKEN", ""),
-	}
-	if cfg.serviceToken == "" {
+func run(logger *log.Logger) error {
+	// ── 1. CONFIG ────────────────────────────────────────────────────────────
+	httpAddr      := config.EnvOrDefault("GUARDIAN_HTTP_ADDR", config.DefaultHTTPAddr)
+	nexusAddr     := config.EnvOrDefault("NEXUS_HTTP_ADDR", config.DefaultNexusAddr)
+	forgeAddr     := config.EnvOrDefault("FORGE_HTTP_ADDR", config.DefaultForgeAddr)
+	navigatorAddr := config.EnvOrDefault("NAVIGATOR_HTTP_ADDR", config.DefaultNavigatorAddr)
+	serviceToken  := config.EnvOrDefault("GUARDIAN_SERVICE_TOKEN", "")
+	if serviceToken == "" {
 		logger.Println("WARNING: GUARDIAN_SERVICE_TOKEN not set — upstream auth disabled")
 	}
-	return cfg
-}
-
-func run(logger *log.Logger) error {
-	cfg := loadConfig(logger)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
 	// ── 2. COLLECTORS ────────────────────────────────────────────────────────
-	forgeColl     := collector.NewForgeCollector(cfg.forgeAddr, cfg.serviceToken)
-	navigatorColl := collector.NewNavigatorCollector(cfg.navigatorAddr)
-	nexusColl     := collector.NewNexusCollector(cfg.nexusAddr, cfg.serviceToken)
+	forgeColl     := collector.NewForgeCollector(forgeAddr, serviceToken)
+	navigatorColl := collector.NewNavigatorCollector(navigatorAddr)
+	nexusColl     := collector.NewNexusCollector(nexusAddr, serviceToken)
 
 	// ── 3. POLICY ENGINE + REPORT STORE ──────────────────────────────────────
 	engine      := policy.NewEngine()
@@ -84,26 +66,11 @@ func run(logger *log.Logger) error {
 	// ── 4. INITIAL EVALUATION ────────────────────────────────────────────────
 	evaluate(ctx, engine, forgeColl, navigatorColl, nexusColl, reportStore, logger)
 	logger.Printf("✓ Guardian ready — http=%s nexus=%s forge=%s navigator=%s",
-		cfg.httpAddr, cfg.nexusAddr, cfg.forgeAddr, cfg.navigatorAddr)
+		httpAddr, nexusAddr, forgeAddr, navigatorAddr)
 
-	return serveAndWait(ctx, cancel, sigCh, cfg.httpAddr, reportStore,
-		engine, forgeColl, navigatorColl, nexusColl, logger)
-}
+	// ── 5. HTTP SERVER ───────────────────────────────────────────────────────
+	srv := api.NewServer(httpAddr, reportStore, logger)
 
-// serveAndWait starts the HTTP server and polling loop, blocks until shutdown.
-func serveAndWait(
-	ctx context.Context,
-	cancel context.CancelFunc,
-	sigCh <-chan os.Signal,
-	httpAddr string,
-	reportStore *handler.ReportStore,
-	engine *policy.Engine,
-	forgeColl *collector.ForgeCollector,
-	navigatorColl *collector.NavigatorCollector,
-	nexusColl *collector.NexusCollector,
-	logger *log.Logger,
-) error {
-	srv  := api.NewServer(httpAddr, reportStore, logger)
 	var wg sync.WaitGroup
 	errCh := make(chan error, 1)
 
@@ -115,8 +82,21 @@ func serveAndWait(
 		}
 	}()
 
+	// ── 6. POLLING LOOP ───────────────────────────────────────────────────────
 	wg.Add(1)
-	go startPollingLoop(ctx, &wg, engine, forgeColl, navigatorColl, nexusColl, reportStore, logger)
+	go func() {
+		defer wg.Done()
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				evaluate(ctx, engine, forgeColl, navigatorColl, nexusColl, reportStore, logger)
+			}
+		}
+	}()
 
 	select {
 	case sig := <-sigCh:
@@ -132,32 +112,7 @@ func serveAndWait(
 	return nil
 }
 
-// startPollingLoop runs the 30-second evaluation cycle until ctx is cancelled.
-func startPollingLoop(
-	ctx context.Context,
-	wg *sync.WaitGroup,
-	engine *policy.Engine,
-	forgeColl *collector.ForgeCollector,
-	navColl *collector.NavigatorCollector,
-	nexusColl *collector.NexusCollector,
-	store *handler.ReportStore,
-	logger *log.Logger,
-) {
-	defer wg.Done()
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			evaluate(ctx, engine, forgeColl, navColl, nexusColl, store, logger)
-		}
-	}
-}
-
 // evaluate runs all collectors and policy engine, updates the report store.
-// A fresh trace ID is generated per cycle for X-Trace-ID propagation (FEAT-002).
 func evaluate(
 	ctx context.Context,
 	engine *policy.Engine,
@@ -167,23 +122,14 @@ func evaluate(
 	store *handler.ReportStore,
 	logger *log.Logger,
 ) {
-	traceID := newTraceID()
+	execs    := forgeColl.Collect(ctx, "")
+	nodes    := navColl.Collect(ctx, "")
+	events   := nexusColl.Collect(ctx)
+	services := nexusColl.CollectServices(ctx)
+	projects := nexusColl.CollectProjects(ctx)
 
-	execs  := forgeColl.Collect(ctx, traceID)
-	nodes  := navColl.Collect(ctx, traceID)
-	events := nexusColl.Collect(ctx, traceID)
-
-	report := engine.Evaluate(execs, nodes, events)
+	report := engine.Evaluate(execs, nodes, events, services, projects)
 	store.Set(report)
-	logger.Printf("evaluated trace=%s — %d finding(s) [%d warnings, %d errors]",
-		traceID, report.Summary.Total, report.Summary.Warnings, report.Summary.Errors)
-}
-
-// newTraceID generates a random 16-byte hex trace ID for collection cycles.
-func newTraceID() string {
-	b := make([]byte, 8)
-	if _, err := rand.Read(b); err != nil {
-		return fmt.Sprintf("gd-%d", time.Now().UnixNano())
-	}
-	return "gd-" + hex.EncodeToString(b)
+	logger.Printf("evaluated — %d finding(s) [%d warnings, %d errors]",
+		report.Summary.Total, report.Summary.Warnings, report.Summary.Errors)
 }

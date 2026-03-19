@@ -13,9 +13,9 @@ import (
 
 // ExecutionRecord is a Forge history entry consumed by the engine.
 type ExecutionRecord struct {
-	Target     string
-	Status     string // "success" | "failure" | "denied"
-	StartedAt  time.Time
+	Target    string
+	Status    string // "success" | "failure" | "denied"
+	StartedAt time.Time
 }
 
 // TopologyNode is a Navigator graph node consumed by the engine.
@@ -28,6 +28,19 @@ type TopologyNode struct {
 type NexusEvent struct {
 	Type      string
 	CreatedAt time.Time
+}
+
+// ServiceRecord is a Nexus service entry consumed by G-006 and G-008.
+type ServiceRecord struct {
+	ID           string
+	ProjectID    string
+	DesiredState string
+	ActualState  string
+}
+
+// ProjectRecord is a registered Nexus project consumed by G-007 and G-008.
+type ProjectRecord struct {
+	ID string
 }
 
 // ── ENGINE ────────────────────────────────────────────────────────────────────
@@ -43,6 +56,8 @@ func (e *Engine) Evaluate(
 	executions []ExecutionRecord,
 	nodes []TopologyNode,
 	events []NexusEvent,
+	services []ServiceRecord,
+	projects []ProjectRecord,
 ) *Report {
 	var findings []*Finding
 
@@ -51,6 +66,9 @@ func (e *Engine) Evaluate(
 	findings = append(findings, e.ruleHighFailureRate(executions)...)
 	findings = append(findings, e.ruleServiceCrashes(events)...)
 	findings = append(findings, e.ruleUnverifiedProjects(nodes)...)
+	findings = append(findings, e.ruleServiceMaintenance(services)...)
+	findings = append(findings, e.ruleNeverBuilt(executions, projects)...)
+	findings = append(findings, e.ruleNoService(services, projects)...)
 
 	return NewReport(findings)
 }
@@ -206,6 +224,78 @@ func (e *Engine) ruleUnverifiedProjects(nodes []TopologyNode) []*Finding {
 				Severity:  SeverityWarning,
 				Target:    n.ID,
 				Message:   fmt.Sprintf("project %q has no valid nexus.yaml — add descriptor to enable full platform integration", n.ID),
+				Count:     1,
+				FirstSeen: now,
+				LastSeen:  now,
+			})
+		}
+	}
+	return findings
+}
+
+// G-006: service desired=running but actual=maintenance.
+func (e *Engine) ruleServiceMaintenance(services []ServiceRecord) []*Finding {
+	var findings []*Finding
+	now := time.Now().UTC()
+	for _, svc := range services {
+		if svc.DesiredState == "running" && svc.ActualState == "maintenance" {
+			findings = append(findings, &Finding{
+				RuleID:    RuleServiceMaintenance,
+				Severity:  SeverityError,
+				Target:    svc.ProjectID,
+				Message:   fmt.Sprintf("service %q is stuck in maintenance — run: engx services reset %s", svc.ID, svc.ID),
+				Count:     1,
+				FirstSeen: now,
+				LastSeen:  now,
+			})
+		}
+	}
+	return findings
+}
+
+// G-007: registered project has zero successful builds ever.
+func (e *Engine) ruleNeverBuilt(execs []ExecutionRecord, projects []ProjectRecord) []*Finding {
+	succeeded := map[string]bool{}
+	attempted := map[string]bool{}
+	for _, ex := range execs {
+		attempted[ex.Target] = true
+		if ex.Status == "success" {
+			succeeded[ex.Target] = true
+		}
+	}
+	var findings []*Finding
+	now := time.Now().UTC()
+	for _, p := range projects {
+		if attempted[p.ID] && !succeeded[p.ID] {
+			findings = append(findings, &Finding{
+				RuleID:    RuleNeverBuilt,
+				Severity:  SeverityWarning,
+				Target:    p.ID,
+				Message:   fmt.Sprintf("project %q has been attempted but never built successfully", p.ID),
+				Count:     1,
+				FirstSeen: now,
+				LastSeen:  now,
+			})
+		}
+	}
+	return findings
+}
+
+// G-008: registered project has no service entry in Nexus.
+func (e *Engine) ruleNoService(services []ServiceRecord, projects []ProjectRecord) []*Finding {
+	hasService := map[string]bool{}
+	for _, svc := range services {
+		hasService[svc.ProjectID] = true
+	}
+	var findings []*Finding
+	now := time.Now().UTC()
+	for _, p := range projects {
+		if !hasService[p.ID] {
+			findings = append(findings, &Finding{
+				RuleID:    RuleNoService,
+				Severity:  SeverityWarning,
+				Target:    p.ID,
+				Message:   fmt.Sprintf("project %q is registered but has no service — run: engx init %s --register", p.ID, p.ID),
 				Count:     1,
 				FirstSeen: now,
 				LastSeen:  now,

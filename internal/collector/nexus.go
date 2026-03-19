@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Harshmaury/Canon/identity"
 	"github.com/Harshmaury/Guardian/internal/policy"
 )
 
@@ -31,18 +30,14 @@ func NewNexusCollector(baseURL, serviceToken string) *NexusCollector {
 }
 
 // Collect fetches recent events from Nexus.
-// traceID is the collection-cycle trace ID for X-Trace-ID propagation (FEAT-002).
-func (c *NexusCollector) Collect(ctx context.Context, traceID string) []policy.NexusEvent {
+func (c *NexusCollector) Collect(ctx context.Context) []policy.NexusEvent {
 	path := fmt.Sprintf("/events?since=%d&limit=100", c.lastEventID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
 	if err != nil {
 		return nil
 	}
 	if c.serviceToken != "" {
-		req.Header.Set(identity.ServiceTokenHeader, c.serviceToken)
-	}
-	if traceID != "" {
-		req.Header.Set(identity.TraceIDHeader, traceID)
+		req.Header.Set("X-Service-Token", c.serviceToken)
 	}
 
 	resp, err := c.httpClient.Do(req)
@@ -54,11 +49,6 @@ func (c *NexusCollector) Collect(ctx context.Context, traceID string) []policy.N
 	}
 	defer resp.Body.Close()
 
-	return c.decodeNexusResponse(resp)
-}
-
-// decodeNexusResponse parses the Nexus /events response body and advances lastEventID.
-func (c *NexusCollector) decodeNexusResponse(resp *http.Response) []policy.NexusEvent {
 	var envelope struct {
 		OK   bool `json:"ok"`
 		Data []struct {
@@ -76,14 +66,87 @@ func (c *NexusCollector) decodeNexusResponse(resp *http.Response) []policy.Nexus
 		if e.ID > c.lastEventID {
 			c.lastEventID = e.ID
 		}
-		ts, err := time.Parse(time.RFC3339Nano, e.CreatedAt)
-		if err != nil {
-			ts = time.Time{} // zero time on malformed timestamp — safe default
-		}
+		ts, _ := time.Parse(time.RFC3339Nano, e.CreatedAt)
 		events = append(events, policy.NexusEvent{
 			Type:      e.Type,
 			CreatedAt: ts,
 		})
 	}
 	return events
+}
+
+// CollectServices fetches service records from Nexus GET /services.
+func (c *NexusCollector) CollectServices(ctx context.Context) []policy.ServiceRecord {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/services", nil)
+	if err != nil {
+		return nil
+	}
+	if c.serviceToken != "" {
+		req.Header.Set("X-Service-Token", c.serviceToken)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		if resp != nil {
+			resp.Body.Close()
+		}
+		return nil
+	}
+	defer resp.Body.Close()
+	var env struct {
+		OK   bool `json:"ok"`
+		Data []struct {
+			ID           string `json:"id"`
+			Project      string `json:"project"`
+			DesiredState string `json:"desired_state"`
+			ActualState  string `json:"actual_state"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		return nil
+	}
+	out := make([]policy.ServiceRecord, 0, len(env.Data))
+	for _, s := range env.Data {
+		out = append(out, policy.ServiceRecord{
+			ID:           s.ID,
+			ProjectID:    s.Project,
+			DesiredState: s.DesiredState,
+			ActualState:  s.ActualState,
+		})
+	}
+	return out
+}
+
+// CollectProjects fetches registered projects from Nexus GET /projects.
+func (c *NexusCollector) CollectProjects(ctx context.Context) []policy.ProjectRecord {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/projects", nil)
+	if err != nil {
+		return nil
+	}
+	if c.serviceToken != "" {
+		req.Header.Set("X-Service-Token", c.serviceToken)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		if resp != nil {
+			resp.Body.Close()
+		}
+		return nil
+	}
+	defer resp.Body.Close()
+	var env struct {
+		OK   bool `json:"ok"`
+		Data []struct {
+			ProjectID string `json:"ProjectID"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		return nil
+	}
+	out := make([]policy.ProjectRecord, 0, len(env.Data))
+	for _, p := range env.Data {
+		if p.ProjectID != "" {
+			out = append(out, policy.ProjectRecord{ID: p.ProjectID})
+		}
+	}
+	return out
 }
