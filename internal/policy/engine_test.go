@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-var engine = NewEngine()
+var engine = NewEngine(false)
 
 func execs(records ...ExecutionRecord) []ExecutionRecord { return records }
 func nodes(ns ...TopologyNode) []TopologyNode           { return ns }
@@ -276,5 +276,54 @@ func TestReport_SummaryCountsCorrectly(t *testing.T) {
 	}
 	if report.Summary.Errors == 0 {
 		t.Error("expected error-severity findings")
+	}
+}
+
+// ── G-009 tests ───────────────────────────────────────────────────────────────
+
+func TestG009_UnattributedExecution_Disabled(t *testing.T) {
+	engine := NewEngine(false) // disabled by default
+	execs := []ExecutionRecord{
+		{Target: "api", Status: "success", ActorSub: ""},
+	}
+	report := engine.Evaluate(execs, nil, nil, nil, nil)
+	for _, f := range report.Findings {
+		if f.RuleID == RuleUnatributedExecution {
+			t.Error("G-009 should not fire when requireIdentity=false")
+		}
+	}
+}
+
+func TestG009_UnattributedExecution_Enabled(t *testing.T) {
+	engine := NewEngine(true)
+	execs := []ExecutionRecord{
+		{Target: "api", Status: "success", ActorSub: ""},
+		{Target: "db",  Status: "success", ActorSub: "harsh@github"},
+	}
+	report := engine.Evaluate(execs, nil, nil, nil, nil)
+	found := false
+	for _, f := range report.Findings {
+		if f.RuleID == RuleUnatributedExecution {
+			found = true
+			if f.Target != "api" {
+				t.Errorf("G-009 target = %q, want %q", f.Target, "api")
+			}
+		}
+	}
+	if !found {
+		t.Error("G-009 should fire for anonymous execution when requireIdentity=true")
+	}
+}
+
+func TestG009_AttributedExecution_NoFinding(t *testing.T) {
+	engine := NewEngine(true)
+	execs := []ExecutionRecord{
+		{Target: "api", Status: "success", ActorSub: "harsh@github"},
+	}
+	report := engine.Evaluate(execs, nil, nil, nil, nil)
+	for _, f := range report.Findings {
+		if f.RuleID == RuleUnatributedExecution {
+			t.Error("G-009 should not fire when actor is set")
+		}
 	}
 }
