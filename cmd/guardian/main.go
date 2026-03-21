@@ -61,7 +61,7 @@ func run(logger *log.Logger) error {
 
 	// ── 2. COLLECTORS ────────────────────────────────────────────────────────
 	forgeColl     := collector.NewForgeCollector(forgeAddr, serviceToken, logger)
-	navigatorColl := collector.NewNavigatorCollector(navigatorAddr, logger)
+	navigatorColl := collector.NewNavigatorCollector(navigatorAddr, serviceToken, logger)
 	nexusColl     := collector.NewNexusCollector(nexusAddr, serviceToken, logger)
 
 	// ── 3. POLICY ENGINE + REPORT STORE ──────────────────────────────────────
