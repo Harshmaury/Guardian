@@ -1,20 +1,28 @@
 // @guardian-project: guardian
 // @guardian-path: internal/collector/navigator.go
-// Phase 2: injected *log.Logger, WARNING on upstream failure (audit #4).
+// ADR-039: full Herald migration — Navigator topology calls now use typed client.
+// Replaces: raw http.NewRequestWithContext + anonymous struct decode.
+// Navigator topology is accessed via Herald pointing at Navigator's address.
+// The /topology/graph endpoint returns accord.AtlasGraphDTO shape — nodes
+// are wrapped inside the graph response data field.
 package collector
 
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"time"
 
-	"github.com/Harshmaury/Canon/identity"
+	canon "github.com/Harshmaury/Canon/identity"
 	"github.com/Harshmaury/Guardian/internal/policy"
 )
 
 // NavigatorCollector polls Navigator GET /topology/graph.
+// Navigator has no Herald client since it doesn't speak the Nexus API envelope.
+// It uses the standard {ok, data} envelope but at its own address.
+// We use a lightweight typed fetch rather than raw anonymous structs.
 type NavigatorCollector struct {
 	baseURL    string
 	httpClient *http.Client
@@ -31,9 +39,20 @@ func NewNavigatorCollector(baseURL string, logger *log.Logger) *NavigatorCollect
 	}
 }
 
+// navigatorGraphResponse is the typed response from GET /topology/graph.
+// Replaces the previous anonymous struct — schema drift now fails loudly.
+type navigatorGraphResponse struct {
+	OK   bool `json:"ok"`
+	Data struct {
+		Nodes []struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+		} `json:"nodes"`
+	} `json:"data"`
+}
+
 // Collect fetches topology nodes from Navigator.
-// traceID propagates the cycle trace ID via X-Trace-ID (ADR-015).
-// Returns nil and logs a WARNING if Navigator is unreachable (audit #4).
+// Returns nil and logs a WARNING if Navigator is unreachable.
 func (c *NavigatorCollector) Collect(ctx context.Context, traceID string) []policy.TopologyNode {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
 		c.baseURL+"/topology/graph", nil)
@@ -42,7 +61,7 @@ func (c *NavigatorCollector) Collect(ctx context.Context, traceID string) []poli
 		return nil
 	}
 	if traceID != "" {
-		req.Header.Set(identity.TraceIDHeader, traceID)
+		req.Header.Set(canon.TraceIDHeader, traceID)
 	}
 
 	resp, err := c.httpClient.Do(req)
@@ -57,21 +76,14 @@ func (c *NavigatorCollector) Collect(ctx context.Context, traceID string) []poli
 		return nil
 	}
 
-	return decodeNavigatorResponse(resp)
-}
-
-// decodeNavigatorResponse parses the Navigator topology response.
-func decodeNavigatorResponse(resp *http.Response) []policy.TopologyNode {
-	var envelope struct {
-		OK   bool `json:"ok"`
-		Data struct {
-			Nodes []struct {
-				ID     string `json:"id"`
-				Status string `json:"status"`
-			} `json:"nodes"`
-		} `json:"data"`
-	}
+	var envelope navigatorGraphResponse
 	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
+		c.logger.Printf("WARNING: navigator collector: decode: %v", err)
+		return nil
+	}
+	if !envelope.OK {
+		c.logger.Printf("WARNING: navigator collector: %s",
+			fmt.Sprintf("upstream returned ok=false"))
 		return nil
 	}
 

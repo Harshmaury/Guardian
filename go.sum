@@ -2,5 +2,5 @@ github.com/Harshmaury/Accord v0.1.1 h1:Mm3fhmxfk06IXIwv/gW27EqbodFTbE12cDOQijDKz
 github.com/Harshmaury/Accord v0.1.1/go.mod h1:HfmELXykJvkZTOuQjiK03f4NUN0i0CBIHk/67flr+yc=
 github.com/Harshmaury/Canon v0.3.0 h1:AwDr0fT7ff63KCwsHGuo94yKk2YR3hLDYKhd/SwUrwY=
 github.com/Harshmaury/Canon v0.3.0/go.mod h1:yGNa8zeXP3JP7uFJusFJeyeNY+w0PnnIJAu2wLuawfE=
-github.com/Harshmaury/Herald v0.1.1 h1:Ca96Tw9B4ZX/8Kkcz41zS4Xdc1d9mZu1RVxDB7GxhxU=
-github.com/Harshmaury/Herald v0.1.1/go.mod h1:/ZCYg3N1rCfnQvS1UvsgsjuTK/4AeuG4uOJSOZpiN+w=
+github.com/Harshmaury/Herald v0.1.2 h1:Srrrvi8MLnso7xchBxwi0cto/wpuXxXQIY+coabz5VA=
+github.com/Harshmaury/Herald v0.1.2/go.mod h1:/ZCYg3N1rCfnQvS1UvsgsjuTK/4AeuG4uOJSOZpiN+w=
