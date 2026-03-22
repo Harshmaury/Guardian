@@ -66,7 +66,7 @@ func run(logger *log.Logger) error {
 
 	// ── 3. POLICY ENGINE + REPORT STORE ──────────────────────────────────────
 	requireIdentity := os.Getenv("GUARDIAN_REQUIRE_IDENTITY") == "true"
-	engine      := policy.NewEngine(requireIdentity)
+	engine      := policy.NewEngine(requireIdentity, nexusAddr)
 	reportStore := handler.NewReportStore()
 
 	// ── 4. INITIAL EVALUATION ────────────────────────────────────────────────

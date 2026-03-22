@@ -16,6 +16,7 @@ const (
 	RuleNeverBuilt         = "G-007" // registered project with zero successful builds
 	RuleNoService              = "G-008" // registered project with no service entry
 	RuleUnatributedExecution  = "G-009" // execution with no identity actor (ADR-042)
+	RuleInsecureMode           = "G-010" // platform running in insecure mode (ADR-044)
 )
 
 // Severity levels for findings.

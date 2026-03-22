@@ -5,7 +5,9 @@
 package policy
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"time"
 
 	canonevents "github.com/Harshmaury/Canon/events"
@@ -50,12 +52,21 @@ type ProjectRecord struct {
 
 // Engine evaluates policy rules and produces findings.
 type Engine struct {
-	requireIdentity bool // set via GUARDIAN_REQUIRE_IDENTITY env (ADR-042)
+	requireIdentity bool   // set via GUARDIAN_REQUIRE_IDENTITY env (ADR-042)
+	nexusAddr       string // used by G-010 to probe /system/mode (ADR-044)
+	httpClient      *http.Client
 }
 
 // NewEngine creates an Engine.
 // requireIdentity enables G-009 — set from GUARDIAN_REQUIRE_IDENTITY env var.
-func NewEngine(requireIdentity bool) *Engine { return &Engine{requireIdentity: requireIdentity} }
+// nexusAddr is the Nexus HTTP address for G-010 mode probing.
+func NewEngine(requireIdentity bool, nexusAddr string) *Engine {
+	return &Engine{
+		requireIdentity: requireIdentity,
+		nexusAddr:       nexusAddr,
+		httpClient:      &http.Client{Timeout: 2 * time.Second},
+	}
+}
 
 // Evaluate runs all rules and returns a Report.
 func (e *Engine) Evaluate(
@@ -76,6 +87,7 @@ func (e *Engine) Evaluate(
 	findings = append(findings, e.ruleNeverBuilt(executions, projects)...)
 	findings = append(findings, e.ruleNoService(services, projects)...)
 	findings = append(findings, e.ruleUnattributedExecution(executions)...)
+	findings = append(findings, e.ruleInsecureMode()...)
 
 	return NewReport(findings)
 }
@@ -337,4 +349,42 @@ func (e *Engine) ruleUnattributedExecution(execs []ExecutionRecord) []*Finding {
 		}
 	}
 	return findings
+}
+
+// G-010: platform running in insecure mode (ADR-044).
+// Polls GET /system/mode on Nexus every evaluation cycle.
+// Clears automatically when mode returns to degraded or full.
+func (e *Engine) ruleInsecureMode() []*Finding {
+	if e.nexusAddr == "" {
+		return nil
+	}
+	resp, err := e.httpClient.Get(e.nexusAddr + "/system/mode")
+	if err != nil {
+		return nil // Nexus unreachable — skip silently, not a G-010 trigger
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
+	var result struct {
+		Data struct {
+			Mode string `json:"mode"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil
+	}
+	if result.Data.Mode != "insecure" {
+		return nil
+	}
+	now := time.Now().UTC()
+	return []*Finding{{
+		RuleID:   RuleInsecureMode,
+		Severity: SeverityWarning,
+		Target:   "platform",
+		Message:  "platform running in insecure mode — identity disabled. Start Gate or set GUARDIAN_REQUIRE_IDENTITY=false to suppress.",
+		Count:    1,
+		FirstSeen: now,
+		LastSeen:  now,
+	}}
 }
