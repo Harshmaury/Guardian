@@ -96,6 +96,7 @@ func (e *Engine) Evaluate(
 
 	// ── Project governance rules (G-011..G-018) ───────────────────────────────
 	findings = append(findings, e.ruleCrashLoop(services)...)
+	findings = append(findings, e.ruleSkipEnforceBypass(events)...)
 	findings = append(findings, e.ruleBeyondRecovery(services)...)
 	findings = append(findings, e.ruleHighRestartFrequency(events, services)...)
 	findings = append(findings, e.ruleBuildNeverSucceeded(executions)...)
@@ -705,4 +706,23 @@ func (e *Engine) ruleStaleProject(execs []ExecutionRecord, services []ServiceRec
 		}
 	}
 	return findings
+}
+
+// G-019: Arbiter --skip-enforce bypass detected (ADR-047).
+// Fires when a SYSTEM_ALERT event with payload containing "skip-enforce" is found.
+// severity: warning — not an error, but must be visible to the developer.
+func (e *Engine) ruleSkipEnforceBypass(events []NexusEvent) []*Finding {
+	for _, ev := range events {
+		if ev.Type == "SYSTEM_ALERT" && ev.ServiceID == "arbiter" {
+			return []*Finding{{
+				RuleID:   RuleSkipEnforceBypass,
+				Severity: SeverityWarning,
+				Target:   "platform",
+				Message:  "--skip-enforce used: Arbiter enforcement gate was bypassed. Review the bypassed project.",
+				Count:    1,
+				LastSeen: ev.CreatedAt,
+			}}
+		}
+	}
+	return nil
 }

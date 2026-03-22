@@ -18,6 +18,7 @@ const (
 	RuleUnatributedExecution  = "G-009" // execution with no identity actor (ADR-042)
 	RuleInsecureMode          = "G-010" // platform running in insecure mode (ADR-044)
 )
+)
 
 // Rule IDs — project-level governance rules (G-011..G-020).
 // These evaluate individual project health rather than platform health.
@@ -30,6 +31,7 @@ const (
 	RuleStuckDenied         = "G-016" // last execution denied, no success in 48h
 	RuleNeverUsed           = "G-017" // registered 7+ days ago, never executed, never running
 	RuleStaleProject        = "G-018" // no execution in 30 days, service desired=stopped
+	RuleSkipEnforceBypass  = "G-019" // --skip-enforce used: Arbiter gate bypassed (ADR-047)
 )
 
 // Severity levels for findings.
@@ -60,9 +62,12 @@ type Summary struct {
 
 // Report is the full Guardian findings report returned by GET /guardian/findings.
 type Report struct {
-	Findings    []*Finding `json:"findings"`
-	Summary     Summary    `json:"summary"`
-	EvaluatedAt time.Time  `json:"evaluated_at"`
+	Findings    []*Finding    `json:"findings"`
+	Summary     Summary       `json:"summary"`
+	EvaluatedAt time.Time     `json:"evaluated_at"`
+	IsStale     bool          `json:"is_stale"`
+	StaleAfter  time.Duration `json:"stale_after_seconds"`
+	StaleSince  *time.Time    `json:"stale_since,omitempty"`
 }
 
 // NewReport builds a Report from a slice of findings.
