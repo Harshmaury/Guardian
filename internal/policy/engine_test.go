@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-var engine = NewEngine(false)
+var engine = NewEngine(false, "")
 
 func execs(records ...ExecutionRecord) []ExecutionRecord { return records }
 func nodes(ns ...TopologyNode) []TopologyNode           { return ns }
@@ -282,7 +282,7 @@ func TestReport_SummaryCountsCorrectly(t *testing.T) {
 // ── G-009 tests ───────────────────────────────────────────────────────────────
 
 func TestG009_UnattributedExecution_Disabled(t *testing.T) {
-	engine := NewEngine(false) // disabled by default
+	engine := NewEngine(false, "") // disabled by default
 	execs := []ExecutionRecord{
 		{Target: "api", Status: "success", ActorSub: ""},
 	}
@@ -295,7 +295,7 @@ func TestG009_UnattributedExecution_Disabled(t *testing.T) {
 }
 
 func TestG009_UnattributedExecution_Enabled(t *testing.T) {
-	engine := NewEngine(true)
+	engine := NewEngine(true, "")
 	execs := []ExecutionRecord{
 		{Target: "api", Status: "success", ActorSub: ""},
 		{Target: "db",  Status: "success", ActorSub: "harsh@github"},
@@ -316,7 +316,7 @@ func TestG009_UnattributedExecution_Enabled(t *testing.T) {
 }
 
 func TestG009_AttributedExecution_NoFinding(t *testing.T) {
-	engine := NewEngine(true)
+	engine := NewEngine(true, "")
 	execs := []ExecutionRecord{
 		{Target: "api", Status: "success", ActorSub: "harsh@github"},
 	}

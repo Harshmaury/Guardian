@@ -45,7 +45,7 @@ func (c *NexusCollector) Collect(ctx context.Context, traceID string) []policy.N
 			c.lastEventID = e.ID
 		}
 		ts := parseTime(e.CreatedAt)
-		result = append(result, policy.NexusEvent{Type: e.Type, CreatedAt: ts})
+		result = append(result, policy.NexusEvent{Type: e.Type, ServiceID: e.ServiceID, CreatedAt: ts})
 	}
 	return result
 }
@@ -64,6 +64,7 @@ func (c *NexusCollector) CollectServices(ctx context.Context, _ string) []policy
 			ProjectID:    s.Project,
 			DesiredState: s.DesiredState,
 			ActualState:  s.ActualState,
+			FailCount:    s.FailCount,
 		})
 	}
 	return out
@@ -107,6 +108,7 @@ func toServiceRecords(svcs []accord.ServiceDTO) []policy.ServiceRecord {
 			ProjectID:    s.Project,
 			DesiredState: s.DesiredState,
 			ActualState:  s.ActualState,
+			FailCount:    s.FailCount,
 		})
 	}
 	return out
