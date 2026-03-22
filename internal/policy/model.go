@@ -14,7 +14,8 @@ const (
 	RuleUnverifiedProjects = "G-005"
 	RuleServiceMaintenance = "G-006" // service desired=running stuck in maintenance
 	RuleNeverBuilt         = "G-007" // registered project with zero successful builds
-	RuleNoService          = "G-008" // registered project with no service entry
+	RuleNoService              = "G-008" // registered project with no service entry
+	RuleUnatributedExecution  = "G-009" // execution with no identity actor (ADR-042)
 )
 
 // Severity levels for findings.

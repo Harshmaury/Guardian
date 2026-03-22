@@ -65,7 +65,8 @@ func run(logger *log.Logger) error {
 	nexusColl     := collector.NewNexusCollector(nexusAddr, serviceToken, logger)
 
 	// ── 3. POLICY ENGINE + REPORT STORE ──────────────────────────────────────
-	engine      := policy.NewEngine()
+	requireIdentity := os.Getenv("GUARDIAN_REQUIRE_IDENTITY") == "true"
+	engine      := policy.NewEngine(requireIdentity)
 	reportStore := handler.NewReportStore()
 
 	// ── 4. INITIAL EVALUATION ────────────────────────────────────────────────

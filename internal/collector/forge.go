@@ -45,6 +45,7 @@ func (c *ForgeCollector) Collect(ctx context.Context, traceID string) []policy.E
 		out = append(out, policy.ExecutionRecord{
 			Target:    r.Target,
 			Status:    r.Status,
+			ActorSub:  r.ActorSub,
 			StartedAt: ts,
 		})
 	}

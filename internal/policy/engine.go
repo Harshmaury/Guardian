@@ -17,6 +17,7 @@ import (
 type ExecutionRecord struct {
 	Target    string
 	Status    string // "success" | "failure" | "denied"
+	ActorSub  string // Gate subject — empty = anonymous (ADR-042)
 	StartedAt time.Time
 }
 
@@ -48,10 +49,13 @@ type ProjectRecord struct {
 // ── ENGINE ────────────────────────────────────────────────────────────────────
 
 // Engine evaluates policy rules and produces findings.
-type Engine struct{}
+type Engine struct {
+	requireIdentity bool // set via GUARDIAN_REQUIRE_IDENTITY env (ADR-042)
+}
 
 // NewEngine creates an Engine.
-func NewEngine() *Engine { return &Engine{} }
+// requireIdentity enables G-009 — set from GUARDIAN_REQUIRE_IDENTITY env var.
+func NewEngine(requireIdentity bool) *Engine { return &Engine{requireIdentity: requireIdentity} }
 
 // Evaluate runs all rules and returns a Report.
 func (e *Engine) Evaluate(
@@ -71,6 +75,7 @@ func (e *Engine) Evaluate(
 	findings = append(findings, e.ruleServiceMaintenance(services)...)
 	findings = append(findings, e.ruleNeverBuilt(executions, projects)...)
 	findings = append(findings, e.ruleNoService(services, projects)...)
+	findings = append(findings, e.ruleUnattributedExecution(executions)...)
 
 	return NewReport(findings)
 }
@@ -298,6 +303,33 @@ func (e *Engine) ruleNoService(services []ServiceRecord, projects []ProjectRecor
 				Severity:  SeverityWarning,
 				Target:    p.ID,
 				Message:   fmt.Sprintf("project %q is registered but has no service — run: engx init %s --register", p.ID, p.ID),
+				Count:     1,
+				FirstSeen: now,
+				LastSeen:  now,
+			})
+		}
+	}
+	return findings
+}
+
+// G-009: execution with no identity actor — anonymous execution detected (ADR-042).
+// Only fires when GUARDIAN_REQUIRE_IDENTITY=true is set in the environment.
+// Fail-open by default — does not block execution, only flags it.
+func (e *Engine) ruleUnattributedExecution(execs []ExecutionRecord) []*Finding {
+	if !e.requireIdentity {
+		return nil
+	}
+	seen := map[string]bool{}
+	var findings []*Finding
+	now := time.Now().UTC()
+	for _, ex := range execs {
+		if ex.ActorSub == "" && !seen[ex.Target] {
+			seen[ex.Target] = true
+			findings = append(findings, &Finding{
+				RuleID:    RuleUnatributedExecution,
+				Severity:  SeverityWarning,
+				Target:    ex.Target,
+				Message:   fmt.Sprintf("execution against %q has no identity actor — run: engx login", ex.Target),
 				Count:     1,
 				FirstSeen: now,
 				LastSeen:  now,
