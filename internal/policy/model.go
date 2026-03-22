@@ -17,7 +17,7 @@ const (
 	RuleNoService             = "G-008" // registered project with no service entry
 	RuleUnatributedExecution  = "G-009" // execution with no identity actor (ADR-042)
 	RuleInsecureMode          = "G-010" // platform running in insecure mode (ADR-044)
-)
+	RuleSkipEnforceBypass  = "G-019" // --skip-enforce used: Arbiter gate bypassed (ADR-047)
 )
 
 // Rule IDs — project-level governance rules (G-011..G-020).
